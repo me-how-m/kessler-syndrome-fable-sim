@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kessler Syndrome — Orbital Cascade</title>
+  <meta name="description" content="A cinematic, interactive simulation of the Kessler syndrome — orbital debris cascade. Part of the #exponentialmath series." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>" />
+  <style>
+    :root {
+      --cy: #7dd3fc;
+      --cy-dim: rgba(125, 211, 252, 0.55);
+      --amber: #fbbf24;
+      --red: #f87171;
+      --glass: rgba(7, 12, 24, 0.52);
+      --edge: rgba(125, 211, 252, 0.16);
+      --txt: #dbe7f4;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #01030a; }
+    body { font-family: var(--mono); color: var(--txt); -webkit-font-smoothing: antialiased; }
+    canvas.webgl { position: fixed; inset: 0; display: block; cursor: grab; }
+    canvas.webgl:active { cursor: grabbing; }
+
+    .panel {
+      background: var(--glass);
+      border: 1px solid var(--edge);
+      border-radius: 12px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    /* ---------- top-left: title + stats ---------- */
+    #hud-tl {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      padding: 14px 16px 12px; width: 264px;
+      opacity: 0; transition: opacity 1.2s ease;
+    }
+    .hud-visible #hud-tl { opacity: 1; }
+    #hud-tl h1 {
+      font-size: 15px; font-weight: 600; letter-spacing: 4.5px; color: #eef6ff;
+    }
+    #hud-tl .sub {
+      font-size: 9px; letter-spacing: 2.2px; color: var(--cy-dim);
+      text-transform: uppercase; margin: 3px 0 12px;
+    }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .stat {
+      border: 1px solid rgba(125, 211, 252, 0.10); border-radius: 8px;
+      padding: 6px 9px 5px; cursor: help; position: relative;
+      background: rgba(10, 18, 34, 0.35);
+    }
+    .stat .k {
+      font-size: 8px; letter-spacing: 1.6px; color: rgba(219, 231, 244, 0.5);
+      text-transform: uppercase; white-space: nowrap;
+    }
+    .stat .v { font-size: 19px; font-weight: 700; margin-top: 1px; color: #f2f8ff; font-variant-numeric: tabular-nums; }
+    .stat .v.small { font-size: 15px; }
+    .stat.sats .v { color: #67d8ff; }
+    .stat.debris .v { color: var(--amber); }
+    #cascade {
+      margin-top: 7px; padding: 5px 10px; border-radius: 7px; text-align: center;
+      font-size: 11px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+      border: 1px solid; transition: color .4s, border-color .4s, background .4s;
+    }
+    #cascade.c0 { color: #4ade80; border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.07); }
+    #cascade.c1 { color: #facc15; border-color: rgba(250,204,21,.35); background: rgba(250,204,21,.07); }
+    #cascade.c2 { color: #fb923c; border-color: rgba(251,146,60,.4); background: rgba(251,146,60,.09); }
+    #cascade.c3 { color: #f87171; border-color: rgba(248,113,113,.55); background: rgba(248,113,113,.12); animation: alarm .55s infinite alternate; }
+    @keyframes alarm { from { opacity: .65; } to { opacity: 1; } }
+
+    .sparks-row { display: flex; gap: 6px; margin-top: 9px; }
+    .spark { flex: 1; min-width: 0; }
+    .spark .k { font-size: 7.5px; letter-spacing: 1.4px; color: rgba(219,231,244,.45); text-transform: uppercase; margin-bottom: 2px; }
+    .spark canvas { width: 100%; height: 30px; display: block; }
+
+    /* ---------- top-right: badges ---------- */
+    #hud-tr {
+      position: fixed; top: 16px; right: 16px; z-index: 10;
+      display: flex; gap: 8px; align-items: center;
+      opacity: 0; transition: opacity 1.2s ease .15s;
+    }
+    .hud-visible #hud-tr { opacity: 1; }
+    #backend {
+      padding: 5px 10px; font-size: 9px; letter-spacing: 2px; font-weight: 700;
+      color: var(--cy); border-radius: 7px;
+    }
+    #fs-btn {
+      width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--edge);
+      background: var(--glass); color: var(--cy-dim); cursor: pointer; font-size: 13px;
+      backdrop-filter: blur(14px);
+    }
+    #fs-btn:hover { color: var(--cy); border-color: var(--cy-dim); }
+
+    /* ---------- bottom-left: credit ---------- */
+    #hud-bl {
+      position: fixed; bottom: 14px; left: 16px; z-index: 10;
+      font-size: 10px; letter-spacing: 1.2px; color: rgba(190, 205, 225, 0.5);
+      opacity: 0; transition: opacity 1.2s ease .3s;
+    }
+    .hud-visible #hud-bl { opacity: 1; }
+    #hud-bl b { color: rgba(219, 231, 244, 0.75); font-weight: 600; }
+
+    /* ---------- bottom-right: hints + legend ---------- */
+    #hud-br {
+      position: fixed; bottom: 14px; right: 16px; z-index: 10; text-align: right;
+      font-size: 9px; letter-spacing: 1.2px; color: rgba(190, 205, 225, 0.42);
+      opacity: 0; transition: opacity 1.2s ease .3s; line-height: 1.9;
+    }
+    .hud-visible #hud-br { opacity: 1; }
+    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 4px 1px 10px; }
+
+    /* ---------- bottom-center: control drawer ---------- */
+    #drawer {
+      position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 11;
+      width: min(760px, calc(100vw - 340px));
+      padding: 10px 16px 12px;
+      opacity: 0; transition: opacity 1.2s ease .45s, transform .35s ease;
+    }
+    .hud-visible #drawer { opacity: 1; }
+    #drawer.collapsed .drawer-body { display: none; }
+    #drawer.collapsed { width: auto; }
+    .drawer-head { display: flex; align-items: center; gap: 8px; }
+    .drawer-head .lbl { font-size: 8.5px; letter-spacing: 2px; color: rgba(219,231,244,.45); text-transform: uppercase; margin-right: 2px; }
+    .chip {
+      padding: 4px 10px; font-size: 10px; letter-spacing: .5px; border-radius: 6px;
+      border: 1px solid rgba(125,211,252,.22); background: transparent; color: var(--cy-dim);
+      cursor: pointer; font-family: var(--mono); white-space: nowrap;
+    }
+    .chip:hover { color: var(--cy); border-color: var(--cy); }
+    .chip.active { color: #06121f; background: var(--cy); border-color: var(--cy); font-weight: 700; }
+    #collapse {
+      margin-left: auto; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--edge);
+      background: transparent; color: var(--cy-dim); cursor: pointer; font-size: 11px; font-family: var(--mono);
+    }
+    #collapse:hover { color: var(--cy); }
+
+    .drawer-body { margin-top: 10px; }
+    .sliders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 18px; }
+    .sl { padding: 2px 0; }
+    .sl .row { display: flex; justify-content: space-between; align-items: center; font-size: 10px; margin-bottom: 3px; }
+    .sl .name { color: rgba(219,231,244,.62); letter-spacing: .4px; display: flex; align-items: center; gap: 5px; }
+    .sl .val { color: #eef6ff; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .info-i {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 11px; height: 11px; border-radius: 50%; border: 1px solid rgba(219,231,244,.25);
+      font-size: 7px; color: rgba(219,231,244,.4); cursor: help; flex: none;
+    }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 2px;
+      background: rgba(125,211,252,.18); border-radius: 2px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%;
+      background: var(--cy); border: none; box-shadow: 0 0 8px rgba(125,211,252,.7);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 11px; height: 11px; border-radius: 50%; background: var(--cy); border: none;
+      box-shadow: 0 0 8px rgba(125,211,252,.7);
+    }
+
+    .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+    .btn {
+      flex: 1; padding: 8px 0; border-radius: 8px; cursor: pointer;
+      font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      background: transparent; transition: background .15s, color .15s;
+    }
+    #btn-run { border: 1px solid rgba(125,211,252,.5); color: var(--cy); }
+    #btn-run:hover { background: rgba(125,211,252,.12); }
+    #btn-reset { border: 1px solid rgba(219,231,244,.25); color: rgba(219,231,244,.6); }
+    #btn-reset:hover { background: rgba(219,231,244,.08); color: var(--txt); }
+    #btn-asat { border: 1px solid rgba(248,113,113,.55); color: var(--red); background: rgba(248,113,113,.06); }
+    #btn-asat:hover { background: rgba(248,113,113,.16); }
+
+    /* ---------- shell labels ---------- */
+    .shell-label {
+      position: fixed; z-index: 5; pointer-events: none;
+      font-size: 8.5px; letter-spacing: 1.8px; color: rgba(125, 165, 220, 0.55);
+      text-transform: uppercase; transform: translate(-50%, -50%);
+      text-shadow: 0 0 6px rgba(0,0,0,.9);
+    }
+
+    /* ---------- tooltip ---------- */
+    #tip {
+      position: fixed; z-index: 50; max-width: 240px; padding: 8px 11px;
+      font-size: 10.5px; line-height: 1.55; color: #cfe0f0; font-family: var(--mono);
+      background: rgba(10, 16, 30, 0.92); border: 1px solid var(--edge); border-radius: 8px;
+      pointer-events: none; display: none; backdrop-filter: blur(10px);
+    }
+
+    /* ---------- intro overlay ---------- */
+    #intro {
+      position: fixed; inset: 0; z-index: 20; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      pointer-events: none; transition: opacity 1.6s ease;
+    }
+    #intro .t1 {
+      font-size: clamp(26px, 5vw, 52px); font-weight: 600; letter-spacing: 14px;
+      color: #eef6ff; text-shadow: 0 0 40px rgba(125,211,252,.35);
+      opacity: 0; animation: fadein 2.2s ease .6s forwards;
+    }
+    #intro .t2 {
+      margin-top: 14px; font-size: clamp(9px, 1.4vw, 12px); letter-spacing: 6px;
+      color: var(--cy-dim); text-transform: uppercase;
+      opacity: 0; animation: fadein 2.2s ease 1.3s forwards;
+    }
+    @keyframes fadein { to { opacity: 1; } }
+    #intro.done { opacity: 0; }
+
+    #loading {
+      position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
+      background: #01030a; transition: opacity .8s ease; font-size: 10px; letter-spacing: 4px;
+      color: var(--cy-dim); text-transform: uppercase;
+    }
+    #loading.done { opacity: 0; pointer-events: none; }
+
+    /* ---------- responsive ---------- */
+    @media (max-width: 900px) {
+      #drawer { width: calc(100vw - 24px); left: 12px; transform: none; bottom: 44px; }
+      .sliders { grid-template-columns: 1fr 1fr; }
+      #hud-tl { width: 232px; padding: 11px 12px 10px; }
+      #hud-br { display: none; }
+      #hud-bl { bottom: 12px; }
+    }
+    @media (max-width: 560px) {
+      .sliders { grid-template-columns: 1fr; gap: 2px; }
+      #hud-tl { transform: scale(.86); transform-origin: top left; }
+      #drawer { max-height: 46vh; overflow-y: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">initializing orbital environment</div>
+
+  <div id="intro">
+    <div class="t1">KESSLER SYNDROME</div>
+    <div class="t2">an orbital debris cascade · #exponentialmath</div>
+  </div>
+
+  <div id="hud-tl" class="panel">
+    <h1>KESSLER SYNDROME</h1>
+    <div class="sub">orbital cascade · live model</div>
+    <div class="stat-grid">
+      <div class="stat" data-info="year"><div class="k">Year</div><div class="v" id="st-year">2026</div></div>
+      <div class="stat" data-info="fragRate"><div class="k">Events / 15y</div><div class="v" id="st-rate">0</div></div>
+      <div class="stat sats" data-info="sats"><div class="k">Active sats</div><div class="v small" id="st-sats">115</div></div>
+      <div class="stat debris" data-info="debris"><div class="k">Debris ×50</div><div class="v small" id="st-debris">30</div></div>
+    </div>
+    <div id="cascade" class="c0" data-info="collisions">Stable</div>
+    <div class="sparks-row">
+      <div class="spark"><div class="k">Sats</div><canvas id="sp-s" width="150" height="60"></canvas></div>
+      <div class="spark"><div class="k">Debris</div><canvas id="sp-d" width="150" height="60"></canvas></div>
+      <div class="spark"><div class="k">Collisions</div><canvas id="sp-c" width="150" height="60"></canvas></div>
+    </div>
+  </div>
+
+  <div id="hud-tr">
+    <div id="backend" class="panel">—</div>
+    <button id="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+  </div>
+
+  <div id="hud-bl"><b>Michal Monit, PhD</b> &nbsp;·&nbsp; #exponentialmath</div>
+
+  <div id="hud-br">
+    <div><span class="dot" style="background:#4fd8ff"></span>satellite<span class="dot" style="background:#ffb545"></span>debris</div>
+    <div>drag to orbit · scroll to zoom</div>
+  </div>
+
+  <div id="drawer" class="panel">
+    <div class="drawer-head">
+      <span class="lbl">Scenario</span>
+      <div id="chips"></div>
+      <button id="collapse" title="Collapse controls" aria-label="Collapse controls">▾</button>
+    </div>
+    <div class="drawer-body">
+      <div class="sliders" id="sliders"></div>
+      <div class="btn-row">
+        <button class="btn" id="btn-run" aria-label="Pause or resume simulation">⏸ PAUSE</button>
+        <button class="btn" id="btn-reset" aria-label="Reset simulation">↻ RESET</button>
+        <button class="btn" id="btn-asat" aria-label="Simulate anti-satellite weapon test">⚠ ASAT TEST</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tip"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
